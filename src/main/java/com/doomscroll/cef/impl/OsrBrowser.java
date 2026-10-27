@@ -1,13 +1,13 @@
 package com.doomscroll.cef.impl;
 
 import com.doomscroll.cef.api.CefBrowserView;
-import com.mojang.blaze3d.GpuFormat;
-import com.mojang.blaze3d.opengl.GlConst;
-import com.mojang.blaze3d.opengl.GlStateManager;
-import com.mojang.blaze3d.opengl.GlTexture;
+import com.mojang.renderpearl.api.GpuFormat;
+import com.mojang.renderpearl.backend.opengl.GlConst;
+import com.mojang.renderpearl.backend.opengl.GlStateManager;
+import com.mojang.renderpearl.backend.opengl.GlTexture;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
@@ -19,7 +19,6 @@ import org.cef.event.CefKeyEvent;
 import org.cef.event.CefMouseEvent;
 import org.cef.event.CefMouseWheelEvent;
 import org.jetbrains.annotations.Nullable;
-import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL12;
 import org.lwjgl.system.MemoryUtil;
 
@@ -338,13 +337,8 @@ final class OsrBrowser extends CefBrowserOsr implements CefBrowserView {
 
 	// ---- mouse ----
 
-	private static int toCefButton(int glfwButton) {
-		// MCEF 2.x: middle and right button are swapped in Minecraft
-		return switch (glfwButton) {
-			case GLFW.GLFW_MOUSE_BUTTON_RIGHT -> 2;
-			case GLFW.GLFW_MOUSE_BUTTON_MIDDLE -> 1;
-			default -> 0;
-		};
+	private static int toCefButton(int minecraftButton) {
+		return Keys.cefButton(minecraftButton);
 	}
 
 	private static int maskFor(int cefButton) {
@@ -356,13 +350,13 @@ final class OsrBrowser extends CefBrowserOsr implements CefBrowserView {
 	}
 
 	/**
-	 * The native side (CinemaMod java-cef, GetCefModifiersGlfw) reads the same field both as the GLFW keyboard
-	 * modifiers (Shift 1, Ctrl 2, Alt 4, Super 8) and as the mouse button mask 0x10/0x20/0x40.
-	 * In GLFW 0x10 is Caps Lock and 0x20 is Num Lock: unless filtered out, every key event went out as
-	 * "left mouse button held" while Caps Lock was on.
+	 * Minecraft's modifier bits in the spelling the native expects: Shift 1, Ctrl 2, Alt 4, Super 8.
+	 * The native (CinemaMod java-cef, GetCefModifiersGlfw) reads the same field as its mouse button mask on
+	 * 0x10/0x20/0x40, so {@link Keys#glfwMods} drops Caps Lock and Num Lock; passing those through once made
+	 * every key event look like "left mouse button held" while Caps Lock was on.
 	 */
-	private static int keyMods(int glfwModifiers) {
-		return glfwModifiers & (GLFW.GLFW_MOD_SHIFT | GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_ALT | GLFW.GLFW_MOD_SUPER);
+	private static int keyMods(int minecraftModifiers) {
+		return Keys.glfwMods(minecraftModifiers);
 	}
 
 	@Override
@@ -370,7 +364,7 @@ final class OsrBrowser extends CefBrowserOsr implements CefBrowserView {
 		int b = toCefButton(event.button());
 		buttonMask |= maskFor(b);
 		// Let Shift+click / Ctrl+click reach the page: keyboard modifiers travel in the same field as the mouse mask
-		sendMouseEvent(new CefMouseEvent(GLFW.GLFW_PRESS, (int) event.x(), (int) event.y(), doubled ? 2 : 1, b,
+		sendMouseEvent(new CefMouseEvent(CefKeyEvent.KEY_PRESS, (int) event.x(), (int) event.y(), doubled ? 2 : 1, b,
 				buttonMask | keyMods(event.modifiers())));
 	}
 
@@ -378,7 +372,7 @@ final class OsrBrowser extends CefBrowserOsr implements CefBrowserView {
 	public void onMouseReleased(MouseButtonEvent event) {
 		int b = toCefButton(event.button());
 		buttonMask &= ~maskFor(b);
-		sendMouseEvent(new CefMouseEvent(GLFW.GLFW_RELEASE, (int) event.x(), (int) event.y(), 1, b,
+		sendMouseEvent(new CefMouseEvent(CefKeyEvent.KEY_RELEASE, (int) event.x(), (int) event.y(), 1, b,
 				buttonMask | keyMods(event.modifiers())));
 	}
 
@@ -398,36 +392,39 @@ final class OsrBrowser extends CefBrowserOsr implements CefBrowserView {
 	@Override
 	public void onKeyPressed(KeyEvent event) {
 		int mods = keyMods(event.modifiers());
-		CefKeyEvent e = new CefKeyEvent(CefKeyEvent.KEY_PRESS, event.key(), (char) event.key(), mods);
-		e.scancode = event.scancode(); // input() is the GLFW key code; the native side derives the Windows key from the scancode
+		int glfwKey = Keys.glfwKey(event.key());
+		CefKeyEvent e = new CefKeyEvent(CefKeyEvent.KEY_PRESS, glfwKey, (char) glfwKey, mods);
+		e.scancode = Keys.windowsScancode(event.key()); // the native derives the Windows virtual key from this
 		sendKeyEvent(e);
 		sendEnterChar(event.key(), mods);
 	}
 
 	/**
-	 * Character event for Enter. GLFW produces no char callback for Enter, whereas Chromium submits the form on
-	 * "keypress \r" only; without this, Enter did nothing in search boxes.
+	 * Character event for Enter. Minecraft delivers no character event for it, whereas Chromium submits the form
+	 * on "keypress \r" only; without this, Enter did nothing in search boxes.
 	 */
-	private void sendEnterChar(int glfwKey, int modifiers) {
-		if (glfwKey == GLFW.GLFW_KEY_ENTER || glfwKey == GLFW.GLFW_KEY_KP_ENTER) {
+	private void sendEnterChar(int key, int modifiers) {
+		if (Keys.isEnter(key)) {
 			sendKeyEvent(new CefKeyEvent(CefKeyEvent.KEY_TYPE, '\r', '\r', modifiers));
 		}
 	}
 
 	@Override
 	public void onKeyReleased(KeyEvent event) {
-		CefKeyEvent e = new CefKeyEvent(CefKeyEvent.KEY_RELEASE, event.key(), (char) event.key(), keyMods(event.modifiers()));
-		e.scancode = event.scancode(); // input() is the GLFW key code; the native side derives the Windows key from the scancode
+		int glfwKey = Keys.glfwKey(event.key());
+		CefKeyEvent e = new CefKeyEvent(CefKeyEvent.KEY_RELEASE, glfwKey, (char) glfwKey, keyMods(event.modifiers()));
+		e.scancode = Keys.windowsScancode(event.key()); // the native derives the Windows virtual key from this
 		sendKeyEvent(e);
 	}
 
 	@Override
-	public void pressKey(int glfwKey) {
-		int scan = org.lwjgl.glfw.GLFW.glfwGetKeyScancode(glfwKey);
+	public void pressKey(int key) {
+		int glfwKey = Keys.glfwKey(key);
+		int scan = Keys.windowsScancode(key);
 		CefKeyEvent down = new CefKeyEvent(CefKeyEvent.KEY_PRESS, glfwKey, (char) glfwKey, 0);
 		down.scancode = scan;
 		sendKeyEvent(down);
-		sendEnterChar(glfwKey, 0);
+		sendEnterChar(key, 0);
 		CefKeyEvent up = new CefKeyEvent(CefKeyEvent.KEY_RELEASE, glfwKey, (char) glfwKey, 0);
 		up.scancode = scan;
 		sendKeyEvent(up);

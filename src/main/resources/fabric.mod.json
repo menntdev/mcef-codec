@@ -3,7 +3,7 @@
 	"id": "mcef-codec",
 	"version": "${version}",
 	"name": "MCEF Codec",
-	"description": "Chromium (with H.264/AAC codecs, CinemaMod java-cef build) for Minecraft 26.2. Library for doomscroll.",
+	"description": "Chromium (with H.264/AAC codecs, CinemaMod java-cef build) for Minecraft 26.3. Library for doomscroll.",
 	"authors": [
 		"mennt"
 	],
@@ -31,8 +31,8 @@
 		}
 	],
 	"depends": {
-		"fabricloader": ">=0.19.0",
-		"minecraft": "~26.2",
+		"fabricloader": ">=0.20.0",
+		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": "*"
 	}

@@ -1,7 +1,7 @@
 package com.doomscroll.cef.api;
 
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -31,8 +31,11 @@ public interface CefBrowserView extends AutoCloseable {
 
 	void onCharTyped(CharacterEvent event);
 
-	/** Presses and releases a single key (GLFW key code; for arrow keys the page receives a trusted event). */
-	void pressKey(int glfwKey);
+	/**
+	 * Presses and releases a single key, given as a Minecraft key code (InputConstants.KEY_*), so the page
+	 * receives a trusted event; used for arrow keys, where a synthetic DOM event is often ignored.
+	 */
+	void pressKey(int key);
 
 	@Nullable
 	GpuTexture getTexture();
